@@ -1,6 +1,6 @@
 # LiftCapture Privacy Policy
 
-**Effective date: July 30, 2026**
+**Effective date: July 31, 2026**
 
 LiftCapture is a velocity-based training app for iPhone and Apple Watch,
 currently in beta. It is built privacy-first: your training data lives on
@@ -38,10 +38,17 @@ on your device — no name, email, account, or device identifier. It is
 transmitted and stored via Apple iCloud (CloudKit) and is used solely to
 improve rep detection, velocity estimation, and app quality.
 
-**What is never shared:** raw motion/sensor recordings, heart-rate data,
-your location, and your identity. Raw sensor data never leaves your
-device unless a future update adds a separate, explicit opt-in — sharing
-it will never be automatic.
+**Optional sensor-recording sharing (separate opt-in):** you may
+additionally choose — via a second, clearly-labeled option that is off
+unless you select it — to share raw workout sensor recordings (wrist
+motion, phone motion, and heart-rate measurements recorded during
+workouts) under the same random anonymous identifier, to directly
+improve rep and velocity detection. These uploads occur over Wi-Fi
+only, and you can turn this off at any time in Settings.
+
+**What is never shared:** your location, your identity, free-text
+notes you write, and — unless you explicitly enable the option above —
+any raw motion or heart-rate data.
 
 If you decline consent, the app is fully functional and nothing is
 shared.

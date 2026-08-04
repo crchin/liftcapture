@@ -54,10 +54,22 @@ same Apple ID your iPhone uses.</p>
   right here in your browser and written to your private iCloud — your
   phone picks them up automatically (or Settings → “Pull imports from
   iCloud now”).</p>
-  <p><b>Workouts</b> — CSV export from Strong
-  (Profile → Settings → Export Strong Data) or Hevy
-  (Settings → Export Data):<br>
+  <p><b>Workouts</b> — CSV export from any app. Strong and Hevy import
+  automatically; anything else (FitNotes, Fitbod, spreadsheets, …) opens
+  a column matcher so you can tell us what's what:<br>
   <input type="file" id="csv-workouts" accept=".csv,text/csv"></p>
+  <div id="mapper" style="display:none; border:1px solid rgba(128,128,128,0.3);
+       border-radius:10px; padding:12px; margin:8px 0;">
+    <b id="mapper-title">Match your columns</b>
+    <div id="mapper-fields" style="margin:8px 0;"></div>
+    <div style="margin:8px 0;">Weights are in:
+      <label><input type="radio" name="unit" value="lb" checked> lb</label>
+      <label><input type="radio" name="unit" value="kg"> kg</label>
+    </div>
+    <div id="mapper-preview" class="muted" style="overflow-x:auto;"></div>
+    <button id="mapper-go" style="margin-top:8px;">Import with this mapping</button>
+    <button id="mapper-cancel">Cancel</button>
+  </div>
   <p><b>Body weight</b> — CSV with lines like
   <code>2026-08-01, 185</code> (add <code>kg</code> for kilos:
   <code>2026-08-01, 84, kg</code>):<br>
@@ -280,32 +292,182 @@ async function saveAll(records) {
   }
 }
 
+async function importSessions(sessions) {
+  const records = [];
+  for (const s of sessions) {
+    const epoch = Math.floor(s.start / 1000);
+    const tonnage = s.sets.reduce((t, x) => t + x.weightLb * x.reps, 0);
+    records.push(rec("WorkoutSummary", `workout|${epoch}`, {
+      startedAt: s.start, endedAt: s.start + 3600e3,
+      templateName: s.name, setCount: s.sets.length,
+      tonnageLb: tonnage, durationS: 3600 }));
+    s.sets.forEach((x, i) => {
+      records.push(rec("SetRecord", `set|${epoch}|${i}`, {
+        sessionStart: s.start, exercise: x.exercise, setOrder: i,
+        kind: x.warm ? "warmup" : "working",
+        weightLb: x.weightLb, reps: x.reps, userRPE: x.rpe,
+        completedAt: s.start }));
+    });
+  }
+  await saveAll(records);
+  istatus(`Imported ${sessions.length} workouts (${records.length - sessions.length} sets). Your phone will pull them within a day — or tap "Pull imports" in Settings.`);
+  render();
+}
+
+// ---- generic column mapper: any row-per-set CSV --------------------
+// Known-but-unit-ambiguous formats prefill it as presets.
+
+const MAP_FIELDS = [
+  ["date", "Date / start time", true],
+  ["exercise", "Exercise name", true],
+  ["weight", "Weight", true],
+  ["reps", "Reps", true],
+  ["workout", "Workout name (optional)", false],
+  ["rpe", "RPE (optional)", false],
+  ["warm", "Warm-up flag/type (optional)", false],
+];
+
+const PRESETS = [
+  { name: "FitNotes", match: h => h.includes("Exercise")
+      && h.includes("Category") && h.includes("Weight"),
+    fill: { date: "Date", exercise: "Exercise", weight: "Weight",
+            reps: "Reps" } },
+  { name: "Fitbod", match: h => h.includes("Exercise")
+      && (h.includes("isWarmup") || h.includes("Warmup")),
+    fill: { date: "Date", exercise: "Exercise", weight: "Weight",
+            reps: "Reps", warm: h => h.includes("isWarmup")
+              ? "isWarmup" : "Warmup" } },
+];
+
+let mapperRows = null;
+
+function openMapper(rows) {
+  mapperRows = rows;
+  const h = rows[0];
+  const preset = PRESETS.find(p => p.match(h));
+  document.getElementById("mapper-title").textContent = preset
+    ? `Looks like ${preset.name} — confirm the columns and units`
+    : "Match your columns";
+  const fields = document.getElementById("mapper-fields");
+  fields.innerHTML = MAP_FIELDS.map(([key, label, req]) => {
+    const opts = ['<option value="">—</option>']
+      .concat(h.map((c, i) => `<option value="${i}">${c}</option>`))
+      .join("");
+    return `<label style="display:block;margin:2px 0;">${label}${req ? " *" : ""}
+      <select id="map-${key}">${opts}</select></label>`;
+  }).join("");
+  if (preset) {
+    for (const [key, col] of Object.entries(preset.fill)) {
+      const name = typeof col === "function" ? col(h) : col;
+      const i = h.indexOf(name);
+      if (i >= 0) document.getElementById(`map-${key}`).value = i;
+    }
+  } else {
+    // best-effort guesses by header name
+    const guess = (key, res) => {
+      const i = h.findIndex(c => res.some(rx => rx.test(c)));
+      if (i >= 0) document.getElementById(`map-${key}`).value = i;
+    };
+    guess("date", [/date/i, /time/i]);
+    guess("exercise", [/exercise/i, /movement/i, /lift/i]);
+    guess("weight", [/weight/i, /load/i]);
+    guess("reps", [/rep/i]);
+    guess("workout", [/workout/i, /title/i, /routine/i]);
+    guess("rpe", [/rpe/i]);
+    guess("warm", [/warm/i, /set.?type/i]);
+  }
+  updatePreview();
+  for (const [key] of MAP_FIELDS) {
+    document.getElementById(`map-${key}`)
+      .addEventListener("change", updatePreview);
+  }
+  document.getElementById("mapper").style.display = "";
+}
+
+function mapperMapping() {
+  const idx = {};
+  for (const [key] of MAP_FIELDS) {
+    const v = document.getElementById(`map-${key}`).value;
+    idx[key] = v === "" ? -1 : parseInt(v);
+  }
+  return idx;
+}
+
+function updatePreview() {
+  const m = mapperMapping();
+  const kg = document.querySelector('input[name="unit"]:checked')
+    .value === "kg";
+  const out = [];
+  for (const r of mapperRows.slice(1, 4)) {
+    const t = m.date >= 0 ? Date.parse(r[m.date]) : NaN;
+    out.push(`${isNaN(t) ? "⚠️ bad date" : new Date(t).toLocaleDateString()}`
+      + ` · ${m.exercise >= 0 ? r[m.exercise] : "?"}`
+      + ` · ${m.weight >= 0 ? r[m.weight] : "?"}${kg ? " kg" : " lb"}`
+      + ` × ${m.reps >= 0 ? r[m.reps] : "?"}`);
+  }
+  document.getElementById("mapper-preview").innerHTML =
+    "Preview:<br>" + out.join("<br>");
+}
+
+document.getElementById("mapper-cancel").addEventListener("click", () => {
+  document.getElementById("mapper").style.display = "none";
+  mapperRows = null;
+});
+
+document.getElementById("mapper-go").addEventListener("click", async () => {
+  const m = mapperMapping();
+  if (m.date < 0 || m.exercise < 0 || m.weight < 0 || m.reps < 0) {
+    istatus("Map the four required columns (marked *) first.");
+    return;
+  }
+  const kg = document.querySelector('input[name="unit"]:checked')
+    .value === "kg";
+  const sessions = new Map();
+  let bad = 0;
+  for (const r of mapperRows.slice(1)) {
+    const t = Date.parse(r[m.date]);
+    if (isNaN(t)) { bad++; continue; }
+    const name = m.workout >= 0 && r[m.workout]
+      ? r[m.workout] : "Workout";
+    // no per-session timestamp granularity? group by calendar day+name
+    const dayKey = new Date(t).toDateString() + "|" + name;
+    if (!sessions.has(dayKey)) {
+      sessions.set(dayKey, { start: t, name, sets: [] });
+    }
+    let w = parseFloat(r[m.weight]) || 0;
+    if (kg) w *= LB_PER_KG;
+    const rpe = m.rpe >= 0 ? parseFloat(r[m.rpe]) : NaN;
+    sessions.get(dayKey).sets.push({
+      exercise: r[m.exercise], weightLb: w,
+      reps: parseInt(r[m.reps]) || 0,
+      rpe: isNaN(rpe) ? null : rpe,
+      warm: m.warm >= 0 && /warm|^w$|^w\d/i.test(r[m.warm] || "") });
+  }
+  const list = [...sessions.values()].filter(s => s.sets.length);
+  if (!list.length) { istatus("No importable rows found."); return; }
+  document.getElementById("mapper").style.display = "none";
+  try {
+    await importSessions(list);
+    if (bad) istatus(document.getElementById("import-status").textContent
+      + ` (${bad} rows skipped — unparseable dates.)`);
+  } catch (e) {
+    istatus("Import failed: " + (e.ckErrorCode || e.message || e));
+  }
+});
+
 document.getElementById("csv-workouts").addEventListener("change",
   async ev => {
     const file = ev.target.files[0];
     if (!file) return;
     try {
-      const sessions = mapWorkoutCSV(parseCSV(await file.text()));
-      if (!sessions) { istatus("Not a Strong or Hevy CSV — check the file."); return; }
-      const records = [];
-      for (const s of sessions) {
-        const epoch = Math.floor(s.start / 1000);
-        const tonnage = s.sets.reduce((t, x) => t + x.weightLb * x.reps, 0);
-        records.push(rec("WorkoutSummary", `workout|${epoch}`, {
-          startedAt: s.start, endedAt: s.start + 3600e3,
-          templateName: s.name, setCount: s.sets.length,
-          tonnageLb: tonnage, durationS: 3600 }));
-        s.sets.forEach((x, i) => {
-          records.push(rec("SetRecord", `set|${epoch}|${i}`, {
-            sessionStart: s.start, exercise: x.exercise, setOrder: i,
-            kind: x.warm ? "warmup" : "working",
-            weightLb: x.weightLb, reps: x.reps, userRPE: x.rpe,
-            completedAt: s.start }));
-        });
+      const rows = parseCSV(await file.text());
+      const sessions = mapWorkoutCSV(rows);
+      if (sessions) {           // Strong/Hevy: fully automatic
+        await importSessions(sessions);
+      } else {                  // everything else: column matcher
+        openMapper(rows);
+        istatus("");
       }
-      await saveAll(records);
-      istatus(`Imported ${sessions.length} workouts (${records.length - sessions.length} sets). Your phone will pull them within a day — or tap "Pull imports" in Settings.`);
-      render();
     } catch (e) {
       istatus("Import failed: " + (e.ckErrorCode || e.message || e));
     }

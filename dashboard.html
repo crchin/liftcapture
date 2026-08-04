@@ -551,16 +551,38 @@ document.getElementById("csv-weight").addEventListener("change",
     const file = ev.target.files[0];
     if (!file) return;
     try {
+      const rows = parseCSV(await file.text());
+      // header-aware: Strong's measurement export and scale apps ship
+      // named columns, sometimes multi-measurement
+      const h = rows[0].map(c => c.trim());
+      const hasHeader = h.some(c => /[A-Za-z]{3}/.test(c)
+        && isNaN(parseFloat(c)));
+      const find = re => h.findIndex(c => re.test(c));
+      const dateCol = hasHeader ? Math.max(0, find(/date|time/i)) : 0;
+      let valueCol = hasHeader ? find(/weight|value/i) : 1;
+      if (valueCol < 0) valueCol = 1;
+      const unitCol = hasHeader ? find(/unit/i)
+                                : (h.length > 2 ? 2 : -1);
+      const nameCol = hasHeader ? find(/measurement|type|name/i) : -1;
+      const kgHeader = hasHeader && /kg/i.test(h[valueCol] || "");
       const records = [];
-      for (const row of parseCSV(await file.text())) {
-        const t = Date.parse(row[0]);
-        let v = parseFloat(row[1]);
+      for (const row of rows.slice(hasHeader ? 1 : 0)) {
+        if (nameCol >= 0 && row[nameCol]
+            && !/weight|body/i.test(row[nameCol])) continue;
+        const t = Date.parse(row[dateCol]);
+        let v = parseFloat(String(row[valueCol] || "")
+          .replace(",", "."));
         if (!t || !v) continue;
-        if (/kg/i.test(row[2] || "")) v *= LB_PER_KG;
+        if (kgHeader || /kg/i.test(row[unitCol] || "")) v *= LB_PER_KG;
+        if (v < 40 || v > 700) continue;   // sanity: human lb
         records.push(rec("BodyWeight",
           `bw|${Math.floor(t / 1000)}`, { date: t, valueLb: v }));
       }
-      if (!records.length) { istatus("No date,weight rows found."); return; }
+      if (!records.length) {
+        istatus("No weight rows found. Columns seen: "
+          + h.join(", ") + " — tell the developer if this looks right.");
+        return;
+      }
       await saveAll(records);
       istatus(`Imported ${records.length} body-weight entries.`);
       render();

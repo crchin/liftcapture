@@ -22,6 +22,14 @@
   .card span { font-size: 0.8rem; opacity: 0.7; }
   .muted { opacity: 0.65; font-size: 0.9rem; }
   #status { margin: 1rem 0; }
+  /* deletion is tucked behind the Edit toggle */
+  body:not(.editing) button.del { display: none; }
+  button.del { color: #c33; background: none; border: none;
+               cursor: pointer; font-size: 1rem; }
+  .chart-box { margin: 0.5rem 0 1.2rem; }
+  .chart-box svg { width: 100%; height: 160px; display: block; }
+  .chart-title { font-size: 0.85rem; opacity: 0.7; margin-bottom: 2px; }
+  select { font-size: 0.95rem; padding: 2px 6px; }
   .pill { font-size: 0.75rem; border: 1px solid rgba(128,128,128,0.4);
           border-radius: 99px; padding: 1px 8px; margin-left: 6px; }
 </style>
@@ -37,7 +45,23 @@ same Apple ID your iPhone uses.</p>
 <div id="status" class="muted">Loading CloudKit…</div>
 <div id="dash" style="display:none">
   <div class="cards" id="cards"></div>
-  <h2>Recent workouts <span class="muted" id="workout-count"></span></h2>
+  <h2>Trends</h2>
+  <p>Exercise: <select id="trend-exercise"></select></p>
+  <div class="chart-box"><div class="chart-title">Top set (lb)</div>
+    <svg id="chart-weight" viewBox="0 0 600 160"
+         preserveAspectRatio="none"></svg></div>
+  <div class="chart-box" id="mcv-box"><div class="chart-title">Best bar speed (MCV)</div>
+    <svg id="chart-mcv" viewBox="0 0 600 160"
+         preserveAspectRatio="none"></svg></div>
+  <div class="chart-box"><div class="chart-title">Weekly tonnage (lb)</div>
+    <svg id="chart-tonnage" viewBox="0 0 600 160"
+         preserveAspectRatio="none"></svg></div>
+  <div class="chart-box" id="bw-box"><div class="chart-title">Body weight (lb)</div>
+    <svg id="chart-bw" viewBox="0 0 600 160"
+         preserveAspectRatio="none"></svg></div>
+  <h2>Recent workouts <span class="muted" id="workout-count"></span>
+    <button id="edit-toggle" class="pill"
+            style="cursor:pointer">Edit</button></h2>
   <table id="workouts"><thead><tr>
     <th>Date</th><th>Workout</th><th class="num">Sets</th>
     <th class="num">Tonnage (lb)</th><th class="num">Duration</th><th></th>
@@ -189,6 +213,121 @@ function renderWorkoutTable() {
     workoutCursor ? "" : "none";
 }
 
+// ---------------- trends (dependency-free SVG) -----------------------
+
+document.getElementById("edit-toggle").addEventListener("click", () => {
+  document.body.classList.toggle("editing");
+  document.getElementById("edit-toggle").textContent =
+    document.body.classList.contains("editing") ? "Done" : "Edit";
+});
+
+function drawSeries(svgId, pts, { bars = false } = {}) {
+  const svg = document.getElementById(svgId);
+  svg.innerHTML = "";
+  if (pts.length < 2) {
+    svg.closest(".chart-box").style.display = pts.length ? "" : "none";
+    return;
+  }
+  svg.closest(".chart-box").style.display = "";
+  const W = 600, H = 160, P = 28;
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (y0 === y1) { y0 -= 1; y1 += 1; }
+  const pad = (y1 - y0) * 0.1;
+  y0 -= pad; y1 += pad;
+  const X = x => P + (W - 2 * P) * (x - x0) / Math.max(1, x1 - x0);
+  const Y = y => H - P + (2 * P - H) * (y - y0) / (y1 - y0);
+  const ns = "http://www.w3.org/2000/svg";
+  const el = (t, a) => {
+    const e = document.createElementNS(ns, t);
+    for (const [k, v] of Object.entries(a)) e.setAttribute(k, v);
+    return e;
+  };
+  const axis = c => el("text", { x: 4, y: c === "max" ? 14 : H - 4,
+    "font-size": 11, fill: "currentColor", opacity: 0.6 });
+  const tMax = axis("max"); tMax.textContent = Math.round(y1 - pad);
+  const tMin = axis("min"); tMin.textContent = Math.round(y0 + pad);
+  svg.append(tMax, tMin);
+  if (bars) {
+    const bw = Math.max(3, (W - 2 * P) / pts.length - 3);
+    for (const p of pts) {
+      svg.append(el("rect", { x: X(p.x) - bw / 2, y: Y(p.y),
+        width: bw, height: (H - P) - Y(p.y),
+        fill: "#4a90d9", opacity: 0.8 }));
+    }
+  } else {
+    svg.append(el("polyline", {
+      points: pts.map(p => `${X(p.x)},${Y(p.y)}`).join(" "),
+      fill: "none", stroke: "#4a90d9", "stroke-width": 2 }));
+    for (const p of pts) {
+      svg.append(el("circle", { cx: X(p.x), cy: Y(p.y), r: 2.5,
+                                fill: "#4a90d9" }));
+    }
+  }
+}
+
+async function renderExerciseTrend(exercise) {
+  const sets = await query("SetRecord", "completedAt", 400,
+    [{ fieldName: "exercise", comparator: "EQUALS",
+       fieldValue: { value: exercise } }]);
+  const byDay = new Map();
+  for (const s of sets) {
+    const day = new Date(s.completedAt || s.sessionStart)
+      .toDateString();
+    const d = byDay.get(day) ?? { x: s.completedAt || s.sessionStart,
+                                  top: 0, mcv: null };
+    d.top = Math.max(d.top, s.weightLb || 0);
+    if (s.bestMCV) d.mcv = Math.max(d.mcv ?? 0, s.bestMCV);
+    byDay.set(day, d);
+  }
+  const days = [...byDay.values()].sort((a, b) => a.x - b.x);
+  drawSeries("chart-weight", days.map(d => ({ x: d.x, y: d.top })));
+  const mcv = days.filter(d => d.mcv != null)
+    .map(d => ({ x: d.x, y: d.mcv }));
+  drawSeries("chart-mcv", mcv);
+}
+
+async function renderTrends(sets) {
+  // exercise picker by frequency
+  const freq = {};
+  for (const s of sets) {
+    if (s.exercise) freq[s.exercise] = (freq[s.exercise] || 0) + 1;
+  }
+  const names = Object.entries(freq).sort((a, b) => b[1] - a[1])
+    .map(([n]) => n);
+  const sel = document.getElementById("trend-exercise");
+  const prev = sel.value;
+  sel.innerHTML = names.map(n => `<option>${n}</option>`).join("");
+  if (names.includes(prev)) sel.value = prev;
+  sel.onchange = () => renderExerciseTrend(sel.value)
+    .catch(e => status("Trend failed: " + (e.ckErrorCode || e.message)));
+  if (sel.value) await renderExerciseTrend(sel.value);
+
+  // weekly tonnage from up to a year of summaries (paged fetch)
+  let all = [], cursor = null, guard = 0;
+  do {
+    const page = await queryPage("WorkoutSummary", "startedAt", 200,
+                                 cursor);
+    all = all.concat(page.records);
+    cursor = page.cursor;
+  } while (cursor && ++guard < 5);
+  const weekMs = 7 * 86400e3;
+  const byWeek = new Map();
+  for (const w of all) {
+    const wk = Math.floor(w.startedAt / weekMs) * weekMs;
+    byWeek.set(wk, (byWeek.get(wk) || 0) + (w.tonnageLb || 0));
+  }
+  const weeks = [...byWeek.entries()].sort((a, b) => a[0] - b[0])
+    .slice(-26).map(([x, y]) => ({ x, y }));
+  drawSeries("chart-tonnage", weeks, { bars: true });
+
+  const bw = await query("BodyWeight", "date", 120);
+  drawSeries("chart-bw",
+    bw.map(m => ({ x: m.date, y: m.valueLb }))
+      .sort((a, b) => a.x - b.x));
+}
+
 document.getElementById("load-more").addEventListener("click", async () => {
   if (!workoutCursor) return;
   const page = await queryPage("WorkoutSummary", "startedAt", 50,
@@ -229,6 +368,7 @@ async function render() {
     }
 
     renderWorkoutTable();
+    renderTrends(sets).catch(() => {});  // charts are best-effort
 
     const byEx = {};
     for (const s of sets) {

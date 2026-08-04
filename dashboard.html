@@ -48,6 +48,22 @@ same Apple ID your iPhone uses.</p>
     <th class="num">Best MCV</th>
   </tr></thead><tbody></tbody></table>
 </div>
+<div id="importer" style="display:none">
+  <h2>Import your history</h2>
+  <p class="muted">Standard imports, one per data type. Files are parsed
+  right here in your browser and written to your private iCloud — your
+  phone picks them up automatically (or Settings → “Pull imports from
+  iCloud now”).</p>
+  <p><b>Workouts</b> — CSV export from Strong
+  (Profile → Settings → Export Strong Data) or Hevy
+  (Settings → Export Data):<br>
+  <input type="file" id="csv-workouts" accept=".csv,text/csv"></p>
+  <p><b>Body weight</b> — CSV with lines like
+  <code>2026-08-01, 185</code> (add <code>kg</code> for kilos:
+  <code>2026-08-01, 84, kg</code>):<br>
+  <input type="file" id="csv-weight" accept=".csv,text/csv"></p>
+  <div id="import-status" class="muted"></div>
+</div>
 
 <script src="https://cdn.apple-cloudkit.com/ck/2/cloudkit.js"></script>
 <script>
@@ -148,9 +164,170 @@ async function render() {
       ? ""
       : "Signed in, but no synced workouts found — open the app on your phone with iCloud sync on, then refresh.");
   } catch (e) {
-    status("Fetch failed: " + (e.ckErrorCode || e.reason || e.message || e));
+    if (e.ckErrorCode === "ZONE_NOT_FOUND") {
+      status("No synced data in this environment yet — open the app on your phone with iCloud sync on, or import your history below.");
+    } else {
+      status("Fetch failed: " + (e.ckErrorCode || e.reason || e.message || e));
+    }
+  }
+  document.getElementById("importer").style.display = "";
+}
+
+// ---------------- import (browser-side parse -> private zone) --------
+
+const istatus = m => document.getElementById("import-status").textContent = m;
+
+function parseCSV(text) {
+  // minimal quoted-field CSV
+  const rows = [];
+  let row = [], field = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') q = false;
+      else field += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (field !== "" || row.length) { row.push(field); rows.push(row); }
+      row = []; field = "";
+      if (c === "\r" && text[i + 1] === "\n") i++;
+    } else field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+const LB_PER_KG = 2.2046226218;
+
+function mapWorkoutCSV(rows) {
+  const h = rows[0];
+  const col = n => h.indexOf(n);
+  let m;
+  if (col("Workout Name") >= 0 && col("Set Order") >= 0) {   // Strong
+    m = { date: col("Date"), workout: col("Workout Name"),
+          exercise: col("Exercise Name"), order: col("Set Order"),
+          weight: col("Weight"), reps: col("Reps"), rpe: col("RPE"),
+          unit: col("Weight Unit"), kgFixed: false, setType: -1 };
+  } else if (col("title") >= 0 && col("exercise_title") >= 0) { // Hevy
+    const kg = col("weight_kg");
+    m = { date: col("start_time"), workout: col("title"),
+          exercise: col("exercise_title"), order: col("set_index"),
+          weight: kg >= 0 ? kg : col("weight_lbs"), reps: col("reps"),
+          rpe: col("rpe"), unit: -1, kgFixed: kg >= 0,
+          setType: col("set_type") };
+  } else return null;
+
+  const sessions = new Map();  // key date|name -> {start, name, sets[]}
+  for (const r of rows.slice(1)) {
+    if (r.length < 3) continue;
+    const start = Date.parse(r[m.date]);
+    if (!start) continue;
+    const key = r[m.date] + "|" + r[m.workout];
+    if (!sessions.has(key)) {
+      sessions.set(key, { start, name: r[m.workout], sets: [] });
+    }
+    let w = parseFloat(r[m.weight]) || 0;
+    if (m.kgFixed || (m.unit >= 0 && /kg/i.test(r[m.unit] || ""))) {
+      w *= LB_PER_KG;
+    }
+    const warm = m.setType >= 0
+      ? /warm/i.test(r[m.setType] || "")
+      : /^W/i.test(r[m.order] || "");
+    const rpe = m.rpe >= 0 ? parseFloat(r[m.rpe]) : NaN;
+    sessions.get(key).sets.push({
+      exercise: r[m.exercise], weightLb: w,
+      reps: parseInt(r[m.reps]) || 0,
+      rpe: isNaN(rpe) ? null : rpe, warm });
+  }
+  return [...sessions.values()].filter(s => s.sets.length);
+}
+
+function rec(type, name, fields) {
+  const f = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v !== null && v !== undefined) f[k] = { value: v };
+  }
+  return { recordType: type, recordName: name, fields: f };
+}
+
+async function ensureZone() {
+  try {
+    await db.fetchRecordZones([{ zoneName: ZONE.zoneName }]);
+  } catch {
+    await db.saveRecordZones([{ zoneName: ZONE.zoneName }]);
   }
 }
+
+async function saveAll(records) {
+  await ensureZone();
+  for (let i = 0; i < records.length; i += 150) {
+    const chunk = records.slice(i, i + 150);
+    const resp = await db.saveRecords(chunk, { zoneID: ZONE });
+    if (resp.hasErrors) {
+      // record-exists conflicts are fine (idempotent re-import)
+      const real = resp.errors.filter(e =>
+        e.ckErrorCode !== "CONFLICT" && e.ckErrorCode !== "EXISTS");
+      if (real.length) throw real[0];
+    }
+    istatus(`Saving… ${Math.min(i + 150, records.length)}/${records.length}`);
+  }
+}
+
+document.getElementById("csv-workouts").addEventListener("change",
+  async ev => {
+    const file = ev.target.files[0];
+    if (!file) return;
+    try {
+      const sessions = mapWorkoutCSV(parseCSV(await file.text()));
+      if (!sessions) { istatus("Not a Strong or Hevy CSV — check the file."); return; }
+      const records = [];
+      for (const s of sessions) {
+        const epoch = Math.floor(s.start / 1000);
+        const tonnage = s.sets.reduce((t, x) => t + x.weightLb * x.reps, 0);
+        records.push(rec("WorkoutSummary", `workout|${epoch}`, {
+          startedAt: s.start, endedAt: s.start + 3600e3,
+          templateName: s.name, setCount: s.sets.length,
+          tonnageLb: tonnage, durationS: 3600 }));
+        s.sets.forEach((x, i) => {
+          records.push(rec("SetRecord", `set|${epoch}|${i}`, {
+            sessionStart: s.start, exercise: x.exercise, setOrder: i,
+            kind: x.warm ? "warmup" : "working",
+            weightLb: x.weightLb, reps: x.reps, userRPE: x.rpe,
+            completedAt: s.start }));
+        });
+      }
+      await saveAll(records);
+      istatus(`Imported ${sessions.length} workouts (${records.length - sessions.length} sets). Your phone will pull them within a day — or tap "Pull imports" in Settings.`);
+      render();
+    } catch (e) {
+      istatus("Import failed: " + (e.ckErrorCode || e.message || e));
+    }
+  });
+
+document.getElementById("csv-weight").addEventListener("change",
+  async ev => {
+    const file = ev.target.files[0];
+    if (!file) return;
+    try {
+      const records = [];
+      for (const row of parseCSV(await file.text())) {
+        const t = Date.parse(row[0]);
+        let v = parseFloat(row[1]);
+        if (!t || !v) continue;
+        if (/kg/i.test(row[2] || "")) v *= LB_PER_KG;
+        records.push(rec("BodyWeight",
+          `bw|${Math.floor(t / 1000)}`, { date: t, valueLb: v }));
+      }
+      if (!records.length) { istatus("No date,weight rows found."); return; }
+      await saveAll(records);
+      istatus(`Imported ${records.length} body-weight entries.`);
+      render();
+    } catch (e) {
+      istatus("Import failed: " + (e.ckErrorCode || e.message || e));
+    }
+  });
 
 container.setUpAuth().then(userIdentity => {
   if (userIdentity) { render(); } else {
@@ -159,6 +336,7 @@ container.setUpAuth().then(userIdentity => {
   container.whenUserSignsIn().then(render);
   container.whenUserSignsOut().then(() => {
     document.getElementById("dash").style.display = "none";
+    document.getElementById("importer").style.display = "none";
     status("Signed out.");
   });
 }).catch(e => {

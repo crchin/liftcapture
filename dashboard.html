@@ -37,11 +37,12 @@ same Apple ID your iPhone uses.</p>
 <div id="status" class="muted">Loading CloudKit…</div>
 <div id="dash" style="display:none">
   <div class="cards" id="cards"></div>
-  <h2>Recent workouts</h2>
+  <h2>Recent workouts <span class="muted" id="workout-count"></span></h2>
   <table id="workouts"><thead><tr>
     <th>Date</th><th>Workout</th><th class="num">Sets</th>
-    <th class="num">Tonnage (lb)</th><th class="num">Duration</th>
+    <th class="num">Tonnage (lb)</th><th class="num">Duration</th><th></th>
   </tr></thead><tbody></tbody></table>
+  <p><button id="load-more" style="display:none">Load 50 more</button></p>
   <h2>Best bar speed by exercise <span class="muted">(last 200 sets)</span></h2>
   <table id="speeds"><thead><tr>
     <th>Exercise</th><th class="num">Top weight (lb)</th>
@@ -115,26 +116,99 @@ function fmtDur(s) {
   return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
 }
 
-async function query(recordType, sortBy, limit) {
-  const resp = await db.performQuery(
-    { recordType, sortBy: [{ fieldName: sortBy, ascending: false }] },
+// paged state: full-history imports run to thousands of records —
+// everything here loads in bounded pages, never "all of it"
+let workoutPage = [];
+let workoutCursor = null;
+
+function recToObj(r) {
+  const o = { _name: r.recordName };
+  for (const [k, v] of Object.entries(r.fields)) o[k] = v.value;
+  return o;
+}
+
+async function query(recordType, sortBy, limit, filter) {
+  const q = { recordType,
+              sortBy: [{ fieldName: sortBy, ascending: false }] };
+  if (filter) q.filterBy = filter;
+  const resp = await db.performQuery(q,
     { zoneID: ZONE, resultsLimit: limit });
   if (resp.hasErrors) throw resp.errors[0];
-  return resp.records.map(r => {
-    const o = {};
-    for (const [k, v] of Object.entries(r.fields)) o[k] = v.value;
-    return o;
-  });
+  return resp.records.map(recToObj);
 }
+
+async function queryPage(recordType, sortBy, limit, cursor) {
+  const resp = cursor
+    ? await db.performQuery(cursor)
+    : await db.performQuery(
+        { recordType, sortBy: [{ fieldName: sortBy, ascending: false }] },
+        { zoneID: ZONE, resultsLimit: limit });
+  if (resp.hasErrors) throw resp.errors[0];
+  return { records: resp.records.map(recToObj),
+           cursor: resp.moreComing ? resp : null };
+}
+
+async function deleteWorkout(w) {
+  if (!confirm(`Delete "${w.templateName || "Workout"}" (${fmtDate(w.startedAt)}) from your synced data? If it also exists on your phone, delete it there too or it may come back.`)) return;
+  // its sets share the sessionStart
+  const sets = await query("SetRecord", "completedAt", 200,
+    [{ fieldName: "sessionStart", comparator: "EQUALS",
+       fieldValue: { value: w.startedAt } }]);
+  const names = sets.map(s => s._name).concat([w._name]);
+  for (let i = 0; i < names.length; i += 150) {
+    const resp = await db.deleteRecords(names.slice(i, i + 150),
+                                        { zoneID: ZONE });
+    if (resp.hasErrors) throw resp.errors[0];
+  }
+  workoutPage = workoutPage.filter(x => x._name !== w._name);
+  renderWorkoutTable();
+}
+
+function renderWorkoutTable() {
+  const wb = document.querySelector("#workouts tbody");
+  wb.innerHTML = "";
+  workoutPage.forEach((w, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${fmtDate(w.startedAt)}</td>
+      <td>${w.templateName || "Workout"}</td>
+      <td class="num">${w.setCount ?? "—"}</td>
+      <td class="num">${w.tonnageLb ? Math.round(w.tonnageLb).toLocaleString() : "—"}</td>
+      <td class="num">${fmtDur(w.durationS)}</td>
+      <td><button data-i="${i}" class="del">✕</button></td>`;
+    wb.appendChild(tr);
+  });
+  wb.querySelectorAll("button.del").forEach(b =>
+    b.addEventListener("click", () =>
+      deleteWorkout(workoutPage[+b.dataset.i])
+        .catch(e => status("Delete failed: "
+          + (e.ckErrorCode || e.message || e)))));
+  document.getElementById("workout-count").textContent =
+    `(showing ${workoutPage.length}${workoutCursor ? "+" : ""})`;
+  document.getElementById("load-more").style.display =
+    workoutCursor ? "" : "none";
+}
+
+document.getElementById("load-more").addEventListener("click", async () => {
+  if (!workoutCursor) return;
+  const page = await queryPage("WorkoutSummary", "startedAt", 50,
+                               workoutCursor);
+  workoutPage = workoutPage.concat(page.records);
+  workoutCursor = page.cursor;
+  renderWorkoutTable();
+});
 
 async function render() {
   status("Fetching your workouts…");
   try {
-    const [workouts, sets, weights] = await Promise.all([
-      query("WorkoutSummary", "startedAt", 40),
+    const [wp, sets, weights] = await Promise.all([
+      queryPage("WorkoutSummary", "startedAt", 50, null),
       query("SetRecord", "completedAt", 200),
       query("BodyWeight", "date", 1),
     ]);
+    workoutPage = wp.records;
+    workoutCursor = wp.cursor;
+    const workouts = workoutPage;
 
     const cards = document.getElementById("cards");
     cards.innerHTML = "";
@@ -142,7 +216,8 @@ async function render() {
     const thisWeek = workouts.filter(w => w.startedAt >= week);
     const addCard = (v, label) => cards.insertAdjacentHTML("beforeend",
       `<div class="card"><b>${v}</b><span>${label}</span></div>`);
-    addCard(workouts.length, "workouts synced");
+    addCard(`${workouts.length}${workoutCursor ? "+" : ""}`,
+            "workouts synced");
     addCard(thisWeek.length, "this week");
     const bests = sets.filter(s => s.bestMCV);
     if (bests.length) {
@@ -153,13 +228,7 @@ async function render() {
       addCard(`${Math.round(weights[0].valueLb)} lb`, "body weight");
     }
 
-    const wb = document.querySelector("#workouts tbody");
-    wb.innerHTML = workouts.map(w => `<tr>
-      <td>${fmtDate(w.startedAt)}</td>
-      <td>${w.templateName || "Workout"}</td>
-      <td class="num">${w.setCount ?? "—"}</td>
-      <td class="num">${w.tonnageLb ? Math.round(w.tonnageLb).toLocaleString() : "—"}</td>
-      <td class="num">${fmtDur(w.durationS)}</td></tr>`).join("");
+    renderWorkoutTable();
 
     const byEx = {};
     for (const s of sets) {
@@ -289,6 +358,10 @@ async function saveAll(records) {
       if (real.length) throw real[0];
     }
     istatus(`Saving… ${Math.min(i + 150, records.length)}/${records.length}`);
+    // full-history imports are thousands of records: pace the requests
+    if (records.length > 1000) {
+      await new Promise(r => setTimeout(r, 200));
+    }
   }
 }
 

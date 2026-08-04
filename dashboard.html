@@ -161,7 +161,19 @@ container.setUpAuth().then(userIdentity => {
     document.getElementById("dash").style.display = "none";
     status("Signed out.");
   });
-}).catch(e => status("CloudKit setup failed: " + (e.message || e)));
+}).catch(e => {
+  const msg = e.ckErrorCode || e.message || e.reason || String(e);
+  // console API tokens are environment-scoped; if this token isn't
+  // valid for production, retry the development environment once
+  if (!new URLSearchParams(location.search).get("env")
+      && ENV === "production") {
+    status("Token not valid for production — trying development…");
+    location.search = "?env=development";
+  } else {
+    status("CloudKit setup failed: " + msg
+      + " — check the API token's environment in the CloudKit console.");
+  }
+});
 </script>
 </body>
 </html>

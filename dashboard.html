@@ -72,11 +72,16 @@ document.getElementById("envpill").textContent = ENV;
 const ZONE = { zoneName: "DerivedMetrics" };
 const status = (m) => document.getElementById("status").textContent = m;
 
+// console API tokens are environment-scoped: one each
+const TOKENS = {
+  production: "f70e6c5d5b40a72a43a92fc8667f5ee60ce4fad6d46b3922969b909ae29157b6",
+  development: "75524811973b1dacdfa4468b5491e16f7adc6a1cd2adb7ad909deea9fd0a90d9",
+};
 CloudKit.configure({
   containers: [{
     containerIdentifier: "iCloud.com.crchin.MinimalCapture",
     apiTokenAuth: {
-      apiToken: "75524811973b1dacdfa4468b5491e16f7adc6a1cd2adb7ad909deea9fd0a90d9",
+      apiToken: TOKENS[ENV] || TOKENS.production,
       persist: true,
       signInButton: { id: "apple-sign-in-button", theme: "black" },
       signOutButton: { id: "apple-sign-out-button", theme: "black" },

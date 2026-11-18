@@ -354,5 +354,5 @@ This policy may be updated during the beta; the effective date above will change
 
 ## Contact
 
-Christopher Chin — chris.r.chin@gmail.com [FOUNDER: becomes the LLC's name and a support address once formed]
+Christopher Chin — chris.r.chin@gmail.com
 

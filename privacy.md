@@ -1,6 +1,6 @@
 # Liftometer Privacy Policy (beta)
 
-**Effective date: November 18, 2026 (Liftometer 0.4.80, build 119)**
+**Effective date: November 23, 2026 (Liftometer 0.4.82, build 121)**
 
 Liftometer is a velocity-based training app for iPhone and Apple Watch, currently in beta. Your training data lives
 on your devices. This page says exactly when anything leaves them, where it goes, and how to stop it.
@@ -294,8 +294,12 @@ send through TestFlight are shared with the developer.
 **Deleting a workout:** If you delete a workout, it is gone from your phone and your plan. The copy you already
 shared for the beta stays on the server marked deleted and is left out of every analysis; it is not erased.
 The app keeps trying for a few days; if it can't reach iCloud by then, it tells you and you can retry.
-Restoring it from Recently Deleted within 30 days takes the mark off.
+Restoring it from Recently Deleted within 30 days takes the mark off. The app keeps trying for a few days; if it
+cannot reach iCloud by then, the shared copy stays marked deleted.
 If a set's place in a workout changes, or you uncheck or remove a set, its earlier shared copy is marked deleted.
+Recordings of a deleted workout that are still on your Watch are not uploaded while it is deleted. Once the workout is
+gone for good, the Watch deletes them when it next reaches your phone, or the phone deletes them with its other old
+recordings.
 
 **Delete your account in the app:** Settings › Account › **Delete account…** (or **Delete account and data** in Settings ›
 Privacy & security), then confirm **Delete everything?**.
@@ -330,13 +334,16 @@ Subscriptions), and Pro comes back on this phone from your App Store purchase.
 
 Two options on the same screen, both off unless you turn them on:
 
-- **Also erase my workouts on this phone** deletes every workout on the phone with its recordings, their copies in your private iCloud, and Recently Deleted. Recordings of those workouts that were not uploaded yet are not sent; an upload already under way at that moment can finish. Otherwise your workouts stay on the phone.
+- **Also erase my workouts on this phone** deletes every workout on the phone with its recordings, their copies in your private iCloud, Recently Deleted, the app's own logs of those workouts (rests, check-off lines, the weekly review) and any training-data export the app still holds. Recordings of those workouts that were not uploaded yet are not sent; an upload already under way at that moment can finish. What stays on this phone: what the app has learned from your workouts (such as your usual rep speed, effort ratings, heart-rate recovery and your rep-count corrections), the awards you earned, the starting numbers you entered, your block plan with its records, your coach chats, templates, body weights, settings and the app's diagnostic notes. Deleting the app removes them. Without this option your workouts stay on the phone.
 - **Also delete the anonymous data I shared** deletes the beta metrics, app-usage metrics and sensor recordings this
   phone uploaded under its random identifier, and turns sharing off. Copies the developer already downloaded for
   analysis are not reached that way: contact the developer to have them deleted too.
 
 Erasing all workouts on this phone doesn't mark the copies you already shared. Deleting your account with "Also
 delete the anonymous data I shared" turned on deletes them.
+
+A file you have shared or saved outside the app (a training-data export, a chat export, a recording, a share card) is
+a copy the app can no longer reach; delete it where you saved it.
 
 You can also contact the developer at the address below for any of these, or with any privacy question.
 

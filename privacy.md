@@ -1,6 +1,6 @@
 # Liftometer Privacy Policy (beta)
 
-**Effective date: November 23, 2026 (Liftometer 0.4.82, build 121)**
+**Effective date: November 28, 2026 (Liftometer 0.4.85, build 124)**
 
 Liftometer is a velocity-based training app for iPhone and Apple Watch, currently in beta. Your training data lives
 on your devices. This page says exactly when anything leaves them, where it goes, and how to stop it.
@@ -126,7 +126,7 @@ Our server does not store your messages, your plan note or file rows, and of you
   renew or get a refund, Apple sends our server a signed record of that purchase: the product, dates, price, store
   country and Apple's transaction IDs, but not your name, email or Apple ID;
 - a usage log under your account ID: time, feature, model, amount used and its cost, how long the request took, your app's build number, whether the request came from
-  a test build, and whether the server retried the model and which of its checks asked for the retry (never what was said). For a block design, the row also
+  a test build, whether the server retried the model, and on some turns a short code for the server check that changed, replaced or refused the coach's answer. A code holds no words of yours or the coach's, but it can show what a turn was about: that a message mentioned a possible heart or fainting warning sign, or pain, or that the server treated you as under 18. For a block design, the row also
   keeps the design itself (for each week, each lift's name with its sets, reps, percentage of its estimated max and effort, and the loads the coach set), so a wrong design can be
   traced, but never your note. A lift you named yourself appears under the name you gave it;
 - the import formats you used (identified by their column names, never rows) with the number of sets imported;
@@ -134,18 +134,17 @@ Our server does not store your messages, your plan note or file rows, and of you
 - recent coach replies, so a dropped answer can be resent, each with its time, the model, the amount used and how the reply ended. A reply can quote what you wrote. A reply that proposed a plan change is also kept with: the change as the server checked and corrected it; for each lift it touches, the lift's strength estimate, whether that estimate comes from bar speed or effort ratings, and what the app itself suggested for the lift (reduce, hold or step up); the week of your block and which version of its plan the change was for; your app's build and the version of the coach's instructions; whether that turn was about pain or a warning sign; and whether Health data was allowed for it. If the server's own checks turned a proposed change down, the names of those checks are kept. Replies over 24 hours old are deleted when the next reply is stored, so your last replies stay until you use the coach chat again.
 
 Apart from coach replies, these records have no automatic expiry today. They are deleted when you delete your
-account, except the usage log and the shared list of file formats (see Data deletion). Server logs record request details. When a block design is corrected, the log
+account, except the usage log and the shared list of file formats (see Data deletion). Server logs record request details. For a coach turn, a log line can name the check that acted and say that the turn was about a heart or fainting warning sign, self-harm, an eating disorder, or a lifter treated as under 18. That line carries no account ID and none of your words; a line about a refused plan change can hold a few words of the coach's reply. When a block design is corrected, the log
 includes your account ID and the corrected lift loads and strength estimates. Cloudflare keeps these logs for up to
 7 days. Cloudflare's record of each request also includes your approximate location (such as your country) and may
 include your IP address.
 
-**Delete my coaching data** (Settings › Coaching) erases the stored coach replies and unlinks your usage rows from
+**Delete my coaching data** (Settings › Coaching, shown while Coaching is on) erases the stored coach replies and unlinks your usage rows from
 you, with your account ID on them replaced by the word "deleted" and any block design removed from them, without
 deleting the account; the app clears its local chat too. Your month's message count is kept, so deleting cannot
 reset your allowance.
 
-If a chat ever freezes, Settings › Diagnostics › **Copy this chat as JSON** puts that conversation on your clipboard
-for you to send us. Nothing is sent unless you send it. From a chat's menu you can copy a message, or export a chat or all your chats as a text file through the share sheet. The file holds the words you and the coach exchanged and each card's visible lines, never the coach's summary of your training. Nothing leaves the phone unless you share it.
+From a chat's menu you can copy a message, or export a chat or all your chats as a text file through the share sheet. The file holds the words you and the coach exchanged and each card's visible lines, never the coach's summary of your training. Nothing leaves the phone unless you share it.
 
 ## What the coach sees
 
@@ -301,6 +300,17 @@ Recordings of a deleted workout that are still on your Watch are not uploaded wh
 gone for good, the Watch deletes them when it next reaches your phone, or the phone deletes them with its other old
 recordings.
 
+**Your Watch's storage:** Bar-speed recordings wait on your Watch until they reach your phone. If your Watch is
+almost out of storage when you start a lifting workout, the app deletes its oldest bar-speed recordings from the
+Watch to make room for the new one, never one from the same day or the last four hours. A recording that had not
+yet reached your phone is then lost; your workouts, sets and heart rate are not. When your Watch is almost full
+and recordings are waiting, its first screen says so and its More… screen offers **Send to iPhone**, which asks
+your phone to take them. More… also offers **Free up space** when there are older recordings to delete: it
+deletes the oldest from the Watch, and what had not yet reached your phone is lost. Your Watch tells your phone
+how much room it has left; how many recordings are waiting, how large they are and how old the oldest is;
+whether it deleted recordings to make room or is recording without bar speed; when its last transfer finished or
+failed; and its model and software version. Your phone uses this to warn you. It does not send it to us.
+
 **Delete your account in the app:** Settings › Account › **Delete account…** (or **Delete account and data** in Settings ›
 Privacy & security), then confirm **Delete everything?**.
 Your account is gone from our server at once. This deletes, at once:
@@ -322,8 +332,7 @@ could not confirm the deletion with our server within seven days, or our server 
 request, the app stops and tells you, so you can start the deletion again.
 
 **What we keep:** the usage log rows stay for our cost accounting, with what is listed for the usage log above, but
-with your account ID replaced by the word "deleted" and any block design removed from them, so they no longer link
-to you or to anything else we hold. The shared list of file formats stays too; it was never linked to you. The log also gains one entry, not linked to you, recording that an account was deleted.
+with your account ID replaced by the word "deleted" and any block design removed from them. Nothing in them identifies you any more; the codes described above stay. The shared list of file formats stays too; it was never linked to you. The log also gains one entry, not linked to you, recording that an account was deleted.
 
 **After a deletion** the server keeps your former account ID and the time of the deletion, for one purpose: to refuse the session your phone
 already held (a session lasts at most 30 minutes). That ID stops being used after 31 minutes and is removed at the
